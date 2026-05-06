@@ -2,7 +2,7 @@
 
 RisuAI 채팅 로그를 다시 읽기 위한 뷰어. 새 대화는 못 함.
 
-**라이브 데모**: https://너아이디.github.io/risu-reader/
+**라이브 데모**: https://mitchellmoon.github.io/risu-reader/
 
 ## 기능
 
