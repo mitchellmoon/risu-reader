@@ -112,6 +112,8 @@
   .search-box { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 200px; max-width: 400px; }
   .search-input { flex: 1; padding: 6px 10px; font-size: 12px; border: 0.5px solid var(--border-tertiary); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); }
   .search-input:focus { outline: none; border-color: var(--text-info); }
+  .search-go { padding: 5px 10px; background: var(--bg-primary); border: 0.5px solid var(--border-tertiary); border-radius: var(--radius-md); cursor: pointer; font-size: 13px; }
+  .search-go:hover { border-color: var(--text-info); }
   .search-nav { display: flex; align-items: center; gap: 2px; }
   .search-nav button { padding: 4px 8px; background: transparent; border: 0.5px solid var(--border-tertiary); border-radius: var(--radius-md); cursor: pointer; font-size: 11px; color: var(--text-secondary); font-family: var(--font-sans); }
   .search-nav button:hover { color: var(--text-primary); }
@@ -219,7 +221,8 @@
     <div class="main-head" id="main-head" style="display: none;">
       <div class="main-title" id="main-title">-</div>
       <div class="search-box">
-        <input class="search-input" id="search-input" type="search" placeholder="채팅 검색..." />
+        <input class="search-input" id="search-input" type="search" placeholder="채팅 검색 (Enter)" />
+        <button class="search-go" id="search-go" title="검색">🔍</button>
         <span class="search-count" id="search-count"></span>
         <div class="search-nav">
           <button id="search-prev" title="이전 (Shift+Enter)">↑</button>
@@ -413,7 +416,7 @@
         const a = findAssetMerged(name, charxUrls, risumUrls);
         if (a) {
           let note = a.exact ? '' : ` <span style="color: var(--text-tertiary);">(폴백: ${escapeHtml(a.matched)})</span>`;
-          result += `<div class="img-wrap"><img src="${a.url}" alt="${escapeHtml(name)}" data-zoom="1"><span class="img-name">${escapeHtml(name)}${note}</span></div>`;
+          result += `<div class="img-wrap"><img src="${a.url}" alt="${escapeHtml(name)}" data-zoom="1"></div>`;
         } else {
           result += `<div class="img-fallback">⚠ 에셋 없음: &lt;img="${escapeHtml(name)}"&gt;</div>`;
         }
@@ -777,32 +780,37 @@
       this.query = (q || '').trim();
       this.matches = [];
       this.activeIdx = -1;
+      this.truncated = false;
 
       if (!this.query) {
         $('search-count').textContent = '';
         Reader._rebuild();
         return;
       }
+      // 너무 짧은 검색어는 매치가 폭주해서 멈출 수 있음
+      if (this.query.length < 1) {
+        $('search-count').textContent = '글자가 너무 짧음';
+        return;
+      }
       const lower = this.query.toLowerCase();
+      const MAX_MATCHES = 100;  // 매치 100개 찾으면 멈춤
+      let totalMatches = 0;
       for (let i = 0; i < Reader.items.length; i++) {
+        if (totalMatches >= MAX_MATCHES) { this.truncated = true; break; }
         const text = (Reader.items[i].text || '').toLowerCase();
         let count = 0, pos = 0;
-        while ((pos = text.indexOf(lower, pos)) !== -1) { count++; pos += lower.length; }
+        while ((pos = text.indexOf(lower, pos)) !== -1) {
+          count++;
+          totalMatches++;
+          pos += lower.length;
+          if (totalMatches >= MAX_MATCHES) break;
+        }
         if (count > 0) this.matches.push({ idx: i, count });
       }
       this.updateCount();
       if (this.matches.length > 0) {
-        this.activeIdx = 0;
-        // 첫 매치가 현재 청킹 범위 안에 있으면 그냥 거기로 스크롤
-        // 밖이면 점프 (청크 새로 그림)
-        const targetIdx = this.matches[0].idx;
-        if (Reader.isMessageVisible(targetIdx)) {
-          this._scrollToMessage(targetIdx);
-          this.applyHighlight();
-        } else {
-          // 매치 위치로 점프할지 물어보지 않고 그냥 점프 (사용자가 검색했으니까)
-          Reader.jumpToMessage(targetIdx);
-        }
+        // 자동으로 첫 매치로 이동 — 0/N 상태 만들지 않음 (위 화살표로 wrap-around 죽는 거 방지)
+        this.gotoMatch(0);
       } else {
         Reader._rebuild();
       }
@@ -811,7 +819,10 @@
     updateCount() {
       const total = this.matches.reduce((s, m) => s + m.count, 0);
       if (this.matches.length === 0 && this.query) $('search-count').textContent = '없음';
-      else if (this.matches.length > 0) $('search-count').textContent = `${this.activeIdx + 1}/${this.matches.length}`;
+      else if (this.matches.length > 0) {
+        const suffix = this.truncated ? '+' : '';
+        $('search-count').textContent = `${this.activeIdx + 1}/${this.matches.length}${suffix}`;
+      }
       else $('search-count').textContent = '';
     },
 
@@ -822,7 +833,9 @@
 
     gotoMatch(activeIdx) {
       if (this.matches.length === 0) return;
-      this.activeIdx = (activeIdx + this.matches.length) % this.matches.length;
+      // wrap-around 안 함 — 처음/끝에서 더 누르면 그냥 멈춤 (멀리 점프 방지)
+      if (activeIdx < 0 || activeIdx >= this.matches.length) return;
+      this.activeIdx = activeIdx;
       const targetIdx = this.matches[this.activeIdx].idx;
       this.updateCount();
       if (Reader.isMessageVisible(targetIdx)) {
@@ -838,41 +851,39 @@
 
     applyHighlight() {
       if (!this.query || !Reader.container) return;
-      const re = new RegExp(this.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-      const els = Reader.container.querySelectorAll('.msg-body');
-      for (let i = 0; i < els.length; i++) {
-        const parentMsg = els[i].closest('.msg');
-        const msgIdx = parentMsg ? parseInt(parentMsg.dataset.idx) : -1;
-        const isActive = this.activeIdx >= 0 && this.matches[this.activeIdx] && this.matches[this.activeIdx].idx === msgIdx;
-        this._highlightInElement(els[i], re, isActive);
-      }
+      // 활성 매치 메시지 1개만 하이라이트 (가볍게)
+      if (this.activeIdx < 0 || !this.matches[this.activeIdx]) return;
+      const targetMsgIdx = this.matches[this.activeIdx].idx;
+      const msgEl = Reader.container.querySelector(`.msg[data-idx="${targetMsgIdx}"] .msg-body`);
+      if (!msgEl) return;
+      this._highlightInElement(msgEl, this.query);
     },
 
-    _highlightInElement(root, re, isActive) {
+    _highlightInElement(root, query) {
+      // 단순 indexOf 기반 (정규식 X). 텍스트 노드만 순회.
+      const lower = query.toLowerCase();
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
       const toReplace = [];
       let node;
       while ((node = walker.nextNode())) {
         const parent = node.parentElement;
-        if (parent && parent.closest('.search-hit, .search-hit-active, .img-name, .msg-meta, .msg-role')) continue;
-        const text = node.nodeValue;
-        re.lastIndex = 0;
-        if (re.test(text)) toReplace.push(node);
+        if (parent && parent.closest('.search-hit-active, .msg-meta, .msg-role')) continue;
+        if (node.nodeValue.toLowerCase().indexOf(lower) !== -1) toReplace.push(node);
       }
-      const cls = isActive ? 'search-hit-active' : 'search-hit';
       for (const node of toReplace) {
         const text = node.nodeValue;
+        const textLower = text.toLowerCase();
         const frag = document.createDocumentFragment();
         let lastIdx = 0;
-        let m;
-        re.lastIndex = 0;
-        while ((m = re.exec(text)) !== null) {
-          if (m.index > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, m.index)));
+        let pos = 0;
+        while ((pos = textLower.indexOf(lower, pos)) !== -1) {
+          if (pos > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, pos)));
           const span = document.createElement('span');
-          span.className = cls;
-          span.textContent = m[0];
+          span.className = 'search-hit-active';
+          span.textContent = text.slice(pos, pos + query.length);
           frag.appendChild(span);
-          lastIdx = m.index + m[0].length;
+          lastIdx = pos + query.length;
+          pos = lastIdx;
         }
         if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)));
         node.parentNode.replaceChild(frag, node);
@@ -1066,16 +1077,17 @@
   $('jump-bottom').onclick = () => Reader.jumpToBottom();
 
   // 검색
-  let searchTimer;
-  $('search-input').oninput = (e) => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => Search.setQuery(e.target.value), 250);
-  };
+  $('search-go').onclick = () => Search.setQuery($('search-input').value);
   $('search-input').onkeydown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (e.shiftKey) Search.prev();
-      else Search.next();
+      // 검색 안 한 상태면 검색 시작, 이미 했으면 다음 매치로
+      if (Search.query !== $('search-input').value.trim()) {
+        Search.setQuery($('search-input').value);
+      } else {
+        if (e.shiftKey) Search.prev();
+        else Search.next();
+      }
     } else if (e.key === 'Escape') {
       e.target.value = '';
       Search.setQuery('');
@@ -1110,10 +1122,6 @@
   boot();
 })();
 </script>
-})();
-  </script>
-
-  <script data-goatcounter="https://mitchmoon.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 
 </body>
 </html>
