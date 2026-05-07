@@ -1,3 +1,26 @@
+## English
+
+A read-only viewer for RisuAI chat logs. Re-read your saved chats with images intact. 
+Upload .charx + chat .json (optionally .risum). All data stays in your browser.
+
+Live demo: https://mitchellmoon.github.io/risu-reader/
+
+## 中文
+
+一个只读的 RisuAI 聊天记录查看器。重新阅读您保存的聊天记录,图片完整保留。
+上传 .charx + 聊天 .json (可选 .risum)。所有数据仅保留在浏览器中。
+
+在线演示: https://mitchellmoon.github.io/risu-reader/
+
+## 日本語
+
+RisuAI チャットログの読み取り専用ビューア。保存したチャットを画像付きで再読できます。
+.charx + チャット .json (任意で .risum) をアップロード。データはすべてブラウザ内に保存。
+
+ライブデモ: https://mitchellmoon.github.io/risu-reader/
+
+
+
 # RisuAI Chat Reader
 
 RisuAI 채팅 로그를 다시 읽기 위한 뷰어. 새 대화는 못 함.
