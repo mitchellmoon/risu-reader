@@ -169,19 +169,12 @@
   /* 청킹 버튼 / 갭 */
   .load-btn { display: block; width: 100%; padding: 14px; background: var(--bg-secondary); border: 0.5px solid var(--border-tertiary); border-radius: var(--radius-md); cursor: pointer; font-size: 13px; color: var(--text-secondary); margin: 1rem 0; font-family: var(--font-sans); }
   .load-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-  .chunk-gap { text-align: center; padding: 12px; margin: 1rem 0; font-size: 12px; color: var(--text-tertiary); border-top: 0.5px dashed var(--border-tertiary); border-bottom: 0.5px dashed var(--border-tertiary); }
-  .chunk-gap b { color: var(--text-secondary); }
-  .gap-fill { margin-left: 8px; padding: 4px 10px; background: transparent; border: 0.5px solid var(--border-tertiary); border-radius: var(--radius-md); cursor: pointer; font-size: 11px; color: var(--text-secondary); font-family: var(--font-sans); }
-  .gap-fill:hover { color: var(--text-primary); border-color: var(--border-secondary); }
   .jump-bottom { position: fixed; bottom: 24px; right: 24px; padding: 10px 14px; background: var(--text-primary); color: var(--bg-primary); border: none; border-radius: 24px; cursor: pointer; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 100; opacity: 0.85; }
   .jump-bottom:hover { opacity: 1; }
 
   /* 토스트/진행 */
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text-primary); color: var(--bg-primary); padding: 10px 18px; border-radius: var(--radius-md); font-size: 13px; opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 200; max-width: 80%; text-align: center; }
   .toast.on { opacity: 1; }
-  .progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; background: var(--bg-secondary); display: none; z-index: 250; }
-  .progress.on { display: block; }
-  .progress-bar { height: 100%; background: var(--text-info); width: 0%; transition: width 0.2s; }
 
   /* 라이트박스 */
   .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.92); display: none; align-items: center; justify-content: center; z-index: 300; cursor: zoom-out; padding: 20px; }
@@ -192,8 +185,6 @@
 <body>
 
 <button class="mobile-toggle" id="mobile-toggle" title="메뉴">☰</button>
-
-<div class="progress" id="progress"><div class="progress-bar" id="progress-bar"></div></div>
 
 <div class="app">
   <!-- 봇 컬럼 -->
@@ -222,12 +213,12 @@
     <div class="main-head" id="main-head" style="display: none;">
       <div class="main-title" id="main-title">-</div>
       <div class="search-box">
-        <input class="search-input" id="search-input" type="search" placeholder="채팅 검색 (Enter)" />
+        <input class="search-input" id="search-input" type="search" placeholder="채팅 검색" />
         <button class="search-go" id="search-go" title="검색">🔍</button>
         <span class="search-count" id="search-count"></span>
         <div class="search-nav">
-          <button id="search-prev" title="이전 (Shift+Enter)">↑</button>
-          <button id="search-next" title="다음 (Enter)">↓</button>
+          <button id="search-prev" title="이전 매치 (더 옛날)">↑</button>
+          <button id="search-next" title="다음 매치 (더 최근)">↓</button>
         </div>
       </div>
       <span class="main-meta" id="main-meta"></span>
@@ -316,12 +307,7 @@
     clearTimeout(toast._t);
     toast._t = setTimeout(() => t.classList.remove('on'), dur);
   }
-  function progress(pct) {
-    const p = $('progress');
-    if (pct === null) { p.classList.remove('on'); return; }
-    p.classList.add('on');
-    $('progress-bar').style.width = pct + '%';
-  }
+  function progress(pct) { /* progress UI 제거됨 */ }
 
   // ============ charx 파싱 ============
   async function parseCharxBlob(blob) {
@@ -385,20 +371,40 @@
   }
 
   // ============ 에셋 매칭 (risum 우선, 폴백 포함) ============
+  // 확장자 뗀 이름 → URL 캐시 (성능)
+  const _stripExtCache = new WeakMap();
+  const _stripExtRe = /\.(png|jpg|jpeg|gif|webp|avif|bmp|svg)$/i;
+  function getStripExtMap(urlMap) {
+    if (!urlMap) return null;
+    let cached = _stripExtCache.get(urlMap);
+    if (cached) return cached;
+    cached = new Map();
+    for (const [k, v] of urlMap) {
+      const stripped = k.replace(_stripExtRe, '');
+      if (stripped !== k && !cached.has(stripped)) cached.set(stripped, { url: v, original: k });
+    }
+    _stripExtCache.set(urlMap, cached);
+    return cached;
+  }
+
   function findAssetMerged(searchName, charxUrls, risumUrls) {
     const trimmed = searchName.trim();
+    // 1) 정확 매칭
     if (risumUrls && risumUrls.has(trimmed)) return { url: risumUrls.get(trimmed), matched: trimmed, exact: true };
     if (charxUrls.has(trimmed)) return { url: charxUrls.get(trimmed), matched: trimmed, exact: true };
-    if (risumUrls) {
-      const names = Array.from(risumUrls.keys()).sort((a, b) => b.length - a.length);
-      for (const n of names) {
-        if (trimmed.startsWith(n + ' ') || trimmed === n) return { url: risumUrls.get(n), matched: n, exact: false };
-      }
+
+    // 2) 확장자 떼고 매칭 (캐시 O(1))
+    const risumStrip = getStripExtMap(risumUrls);
+    if (risumStrip && risumStrip.has(trimmed)) {
+      const hit = risumStrip.get(trimmed);
+      return { url: hit.url, matched: hit.original, exact: true };
     }
-    const cnames = Array.from(charxUrls.keys()).sort((a, b) => b.length - a.length);
-    for (const n of cnames) {
-      if (trimmed.startsWith(n + ' ') || trimmed === n) return { url: charxUrls.get(n), matched: n, exact: false };
+    const charxStrip = getStripExtMap(charxUrls);
+    if (charxStrip && charxStrip.has(trimmed)) {
+      const hit = charxStrip.get(trimmed);
+      return { url: hit.url, matched: hit.original, exact: true };
     }
+
     return null;
   }
 
@@ -416,8 +422,7 @@
         const name = im[1].trim();
         const a = findAssetMerged(name, charxUrls, risumUrls);
         if (a) {
-          let note = a.exact ? '' : ` <span style="color: var(--text-tertiary);">(폴백: ${escapeHtml(a.matched)})</span>`;
-          result += `<div class="img-wrap"><img src="${a.url}" alt="${escapeHtml(name)}" data-zoom="1"></div>`;
+          result += `<div class="img-wrap"><img src="${a.url}" alt="${escapeHtml(name)}" data-zoom="1" loading="lazy"></div>`;
         } else {
           result += `<div class="img-fallback">⚠ 에셋 없음: &lt;img="${escapeHtml(name)}"&gt;</div>`;
         }
@@ -546,12 +551,13 @@
   }
 
   // ============ 청킹 + 검색 컨트롤러 ============
-  // 메시지를 30개씩 청크로 묶어서 그림.
+  // 메시지를 3개씩 청크로 묶어서 그림.
   // 기본: 마지막 청크부터 그려서 위로 더 보기 가능.
   // 검색에서 점프하면 그 매치 메시지 청크만 새로 그림.
-  // 동시에 그려진 청크 최대 10개 (=300 메시지) 제한.
-  const CHUNK_SIZE = 5;
-  const MAX_CHUNKS = 4;
+  // 동시에 최대 3개 청크 (=9 메시지) 유지.
+  // 캐릭터챗 메시지가 길어서 적게 그리는 게 가볍다.
+  const CHUNK_SIZE = 3;
+  const MAX_CHUNKS = 3;
 
   const Reader = {
     items: [],         // 모든 메시지 데이터
@@ -579,34 +585,12 @@
 
       this._rebuild();
 
-      // 스크롤 끝 닿으면 자동 추가
-      container.onscroll = () => this._onScroll();
+      // 자동 확장 제거됨 — 사용자가 버튼으로만 확장
 
       // 맨 아래로 스크롤
       requestAnimationFrame(() => {
         container.scrollTop = container.scrollHeight;
       });
-    },
-
-    _onScroll() {
-      // throttle: 0.2초 안에 또 호출되면 무시
-      const now = Date.now();
-      if (this._lastScroll && now - this._lastScroll < 200) return;
-      this._lastScroll = now;
-
-      const c = this.container;
-      const scrollTop = c.scrollTop;
-      const scrollBot = c.scrollHeight - c.scrollTop - c.clientHeight;
-
-      // 위 끝 (50px 이내) + 위에 더 있음
-      if (scrollTop < 50 && this.chunks[0].startIdx > 0) {
-        this.expandUp();
-        return;
-      }
-      // 아래 끝 (50px 이내) + 아래 더 있음
-      if (scrollBot < 50 && this.chunks[this.chunks.length-1].endIdx < this.items.length) {
-        this.expandDown();
-      }
     },
 
     _makeMsgElement(idx) {
@@ -628,41 +612,9 @@
       return btn;
     },
 
-    _makeGap(beforeChunkIdx) {
-      // 청크와 청크 사이 (검색 점프로 인해 끊긴 부분)
-      const div = document.createElement('div');
-      div.className = 'chunk-gap';
-      const c1 = this.chunks[beforeChunkIdx - 1];
-      const c2 = this.chunks[beforeChunkIdx];
-      const missingCount = c2.startIdx - c1.endIdx;
-      div.textContent = `··· 사이에 ${missingCount}개 메시지 ···`;
-      return div;
-    },
-
     _rebuild() {
       // 청크들을 startIdx 기준 정렬
       this.chunks.sort((a, b) => a.startIdx - b.startIdx);
-
-      // 인접 청크 병합 (예: [0,30] [30,60] → [0,60])
-      const merged = [];
-      for (const c of this.chunks) {
-        if (merged.length > 0 && merged[merged.length-1].endIdx >= c.startIdx) {
-          merged[merged.length-1].endIdx = Math.max(merged[merged.length-1].endIdx, c.endIdx);
-        } else {
-          merged.push({ ...c });
-        }
-      }
-      this.chunks = merged;
-
-      // 최대 청크 수 제한 — 넘으면 마지막 청크에서 가장 멀리 있는 거부터 제거
-      // (사용자가 마지막 메시지 위주로 본다고 가정)
-      if (this.chunks.length > MAX_CHUNKS) {
-        const lastChunk = this.chunks[this.chunks.length - 1];
-        // 마지막 청크에서 가장 먼 (= 위쪽에 있는) 청크부터 제거
-        this.chunks.sort((a, b) => Math.abs(b.startIdx - lastChunk.startIdx) - Math.abs(a.startIdx - lastChunk.startIdx));
-        this.chunks = this.chunks.slice(0, MAX_CHUNKS);
-        this.chunks.sort((a, b) => a.startIdx - b.startIdx);
-      }
 
       // DOM 다시 그리기
       const c = this.container;
@@ -679,26 +631,8 @@
         c.appendChild(upBtn);
       }
 
-      // 청크들 그리기 (사이사이에 gap 또는 메시지)
-      for (let ci = 0; ci < this.chunks.length; ci++) {
-        if (ci > 0) {
-          const c1 = this.chunks[ci - 1];
-          const c2 = this.chunks[ci];
-          if (c2.startIdx > c1.endIdx) {
-            // 사이 비어있음 - gap 표시
-            const gap = document.createElement('div');
-            gap.className = 'chunk-gap';
-            const missingCount = c2.startIdx - c1.endIdx;
-            gap.innerHTML = `··· 사이에 <b>${missingCount}개 메시지</b> ··· <button class="gap-fill">사이 채우기</button>`;
-            gap.querySelector('.gap-fill').onclick = () => {
-              // 양쪽 청크 사이에 새 청크 추가
-              this.chunks.push({ startIdx: c1.endIdx, endIdx: Math.min(c1.endIdx + CHUNK_SIZE, c2.startIdx) });
-              this._rebuild();
-            };
-            c.appendChild(gap);
-          }
-        }
-        const chunk = this.chunks[ci];
+      // 청크들 그리기
+      for (const chunk of this.chunks) {
         for (let i = chunk.startIdx; i < chunk.endIdx; i++) {
           c.appendChild(this._makeMsgElement(i));
         }
@@ -717,12 +651,15 @@
 
     expandUp() {
       const first = this.chunks[0];
+      if (first.startIdx <= 0) return;
       const newStart = Math.max(0, first.startIdx - CHUNK_SIZE);
       // 스크롤 위치 보존
       const c = this.container;
       const oldScrollHeight = c.scrollHeight;
       const oldScrollTop = c.scrollTop;
+      // 위에 추가, 청크 수 초과면 마지막(=아래) 제거
       this.chunks.unshift({ startIdx: newStart, endIdx: first.startIdx });
+      if (this.chunks.length > MAX_CHUNKS) this.chunks.pop();
       this._rebuild();
       requestAnimationFrame(() => {
         const newScrollHeight = c.scrollHeight;
@@ -732,8 +669,11 @@
 
     expandDown() {
       const last = this.chunks[this.chunks.length - 1];
+      if (last.endIdx >= this.items.length) return;
       const newEnd = Math.min(this.items.length, last.endIdx + CHUNK_SIZE);
+      // 아래에 추가, 청크 수 초과면 첫(=위) 제거
       this.chunks.push({ startIdx: last.endIdx, endIdx: newEnd });
+      if (this.chunks.length > MAX_CHUNKS) this.chunks.shift();
       this._rebuild();
     },
 
@@ -796,7 +736,8 @@
       const lower = this.query.toLowerCase();
       const MAX_MATCHES = 100;  // 매치 100개 찾으면 멈춤
       let totalMatches = 0;
-      for (let i = 0; i < Reader.items.length; i++) {
+      // 뒤에서 앞으로 순회 (최근 메시지부터 매치 수집)
+      for (let i = Reader.items.length - 1; i >= 0; i--) {
         if (totalMatches >= MAX_MATCHES) { this.truncated = true; break; }
         const text = (Reader.items[i].text || '').toLowerCase();
         let count = 0, pos = 0;
@@ -1077,35 +1018,10 @@
   $('mobile-toggle').onclick = () => document.body.classList.toggle('sidebar-open');
   $('jump-bottom').onclick = () => Reader.jumpToBottom();
 
-  // 검색
+  // 검색 (마우스/터치 전용)
   $('search-go').onclick = () => Search.setQuery($('search-input').value);
-  $('search-input').onkeydown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      // 검색 안 한 상태면 검색 시작, 이미 했으면 다음 매치로
-      if (Search.query !== $('search-input').value.trim()) {
-        Search.setQuery($('search-input').value);
-      } else {
-        if (e.shiftKey) Search.prev();
-        else Search.next();
-      }
-    } else if (e.key === 'Escape') {
-      e.target.value = '';
-      Search.setQuery('');
-    }
-  };
-  $('search-prev').onclick = () => Search.prev();
-  $('search-next').onclick = () => Search.next();
-  // 전역 Ctrl+F → 우리 검색 박스로
-  document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-      if (state.activeChat) {
-        e.preventDefault();
-        $('search-input').focus();
-        $('search-input').select();
-      }
-    }
-  });
+  $('search-prev').onclick = () => Search.next();  // ↑ = 더 옛날 = next (인덱스 증가)
+  $('search-next').onclick = () => Search.prev();  // ↓ = 더 최근 = prev (인덱스 감소)
 
   // 드래그앤드롭
   $('col-bots').ondragover = (e) => e.preventDefault();
